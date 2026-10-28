@@ -163,7 +163,7 @@ struct LimitedBanner: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.75))
             Spacer()
-            Button("管理", action: action)
+            Button("去设置", action: action)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.blue)
         }

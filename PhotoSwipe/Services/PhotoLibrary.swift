@@ -38,13 +38,12 @@ final class PhotoLibrary: ObservableObject {
         return result
     }
 
-    /// 用户只授权了「部分照片」时，调起系统的补选界面
+    /// 用户只授权了「部分照片」时，跳到系统设置重新选择。
+    /// 注：presentLimitedLibraryPicker(from:) 在 iOS 18 的 SDK 里已不可用，
+    /// 所以这里直接打开本 App 的设置页，用户在里面就能改照片权限。
     func presentLimitedPicker() {
-        guard let scene = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene })
-                .first(where: { $0.activationState == .foregroundActive }),
-              let root = scene.keyWindow?.rootViewController else { return }
-        PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: root)
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     // MARK: - 统计与列表
@@ -188,11 +187,5 @@ final class PhotoLibrary: ObservableObject {
         } catch {
             await MainActor.run { self.lastError = error.localizedDescription }
         }
-    }
-}
-
-private extension UIWindowScene {
-    var keyWindow: UIWindow? {
-        windows.first(where: { $0.isKeyWindow }) ?? windows.first
     }
 }
