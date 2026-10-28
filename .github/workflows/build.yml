@@ -1,0 +1,71 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: 编译打包
+    runs-on: macos-15
+    timeout-minutes: 40
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 查看编译环境
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep iphoneos || true
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: xcodegen generate
+
+      - name: 编译（不签名）
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project PhotoSwipe.xcodeproj \
+            -scheme PhotoSwipe \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath ./build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            build 2>&1 | tee build.log | tail -n 60
+
+      - name: 打包为 IPA
+        run: |
+          APP_PATH="./build/Build/Products/Release-iphoneos/PhotoSwipe.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "找不到编译产物，构建失败"
+            exit 1
+          fi
+          rm -rf Payload PhotoSwipe.ipa
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -r -q PhotoSwipe.ipa Payload
+          rm -rf Payload
+          ls -lh PhotoSwipe.ipa
+
+      - name: 上传 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhotoSwipe-IPA
+          path: PhotoSwipe.ipa
+          retention-days: 60
+
+      - name: 失败时保留日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
