@@ -1,5 +1,6 @@
 import SwiftUI
 import Photos
+import UIKit
 
 struct SwipeViewerView: View {
     let category: SmartCategory
@@ -17,7 +18,7 @@ struct SwipeViewerView: View {
     @State private var toast: String? = nil
     @State private var showTrash = false
 
-    private enum DragAxis { case horizontal, vertical }
+    private enum DragAxis: Equatable { case horizontal, vertical }
 
     var body: some View {
         GeometryReader { geo in
@@ -254,11 +255,11 @@ struct SwipeViewerView: View {
                 let thresholdX = geo.size.width * 0.24
                 let thresholdY = geo.size.height * 0.11
 
-                if axis == .horizontal, abs(value.translation.width) > thresholdX {
+                if axis == .some(.horizontal), abs(value.translation.width) > thresholdX {
                     step(value.translation.width < 0 ? 1 : -1)
-                } else if axis == .vertical, value.translation.height < -thresholdY {
+                } else if axis == .some(.vertical), value.translation.height < -thresholdY {
                     markForDeletion()
-                } else if axis == .vertical, value.translation.height > thresholdY {
+                } else if axis == .some(.vertical), value.translation.height > thresholdY {
                     addToFavorites()
                 } else {
                     withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {

@@ -149,8 +149,8 @@ final class PhotoLibrary: ObservableObject {
                   coverImageCache[id] == nil else { continue }
             let result = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
             guard let asset = result.firstObject else { continue }
-            if let image = await image(for: asset, targetSize: CGSize(width: 300, height: 300)) {
-                await MainActor.run { self.coverImageCache[id] = image }
+            if let thumb = await self.image(for: asset, targetSize: CGSize(width: 300, height: 300)) {
+                await MainActor.run { self.coverImageCache[id] = thumb }
             }
         }
     }

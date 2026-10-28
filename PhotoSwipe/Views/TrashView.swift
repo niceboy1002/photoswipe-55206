@@ -1,5 +1,6 @@
 import SwiftUI
 import Photos
+import UIKit
 
 struct TrashView: View {
     @EnvironmentObject private var library: PhotoLibrary
