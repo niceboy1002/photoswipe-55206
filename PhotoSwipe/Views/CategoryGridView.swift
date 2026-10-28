@@ -27,8 +27,20 @@ struct CategoryGridView: View {
                     .padding(.top, 6)
                 }
 
+                NavigationLink {
+                    SwipeViewerView(category: .all)
+                } label: {
+                    AllPhotosHero(
+                        count: library.counts[.all] ?? 0,
+                        cover: library.coverImage(for: .all)
+                    )
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
                 LazyVGrid(columns: columns, spacing: 10) {
-                    ForEach(SmartCategory.allCases) { category in
+                    ForEach(SmartCategory.gridCases) { category in
                         NavigationLink {
                             SwipeViewerView(category: category)
                         } label: {
@@ -42,7 +54,7 @@ struct CategoryGridView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 6)
+                .padding(.top, 12)
                 .padding(.bottom, 30)
             }
             .background(Color.black)
@@ -87,6 +99,67 @@ struct CategoryGridView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - 「全部照片」入口
+
+struct AllPhotosHero: View {
+    let count: Int
+    let cover: UIImage?
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(hex: "#3B3B4A") ?? .gray, Color(hex: "#15151C") ?? .black],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            if let cover {
+                Image(uiImage: cover)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 128)
+                    .clipped()
+                    .blur(radius: 1)
+            }
+
+            LinearGradient(
+                colors: [Color.black.opacity(0.72), Color.black.opacity(0.25)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("全部照片")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white)
+                    Text("共 \(count) 项 · 从头滑一遍")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.white.opacity(0.65))
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            .padding(.horizontal, 16)
+        }
+        .frame(height: 128)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
+        }
+        .opacity(count == 0 ? 0.45 : 1)
     }
 }
 

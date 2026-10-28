@@ -1,6 +1,7 @@
 import Foundation
 import Photos
 import UIKit
+import AVFoundation
 
 /// PhotoKit 的唯一入口。
 /// 所有重活（遍历、取图、删除）都丢到后台队列，主线程只负责刷新 UI。
@@ -17,6 +18,15 @@ final class PhotoLibrary: ObservableObject {
     private var listCache: [SmartCategory: [PHAsset]] = [:]
     /// 封面缩略图。加了 @Published，加载完成后网格会自动刷新
     @Published private var coverImageCache: [String: UIImage] = [:]
+
+    /// 解码后的图片缓存。滑动时同一张图会被反复创建/销毁视图，
+    /// 有这层缓存就不会每次都闪一下转圈。
+    private let imageCache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 60
+        cache.totalCostLimit = 120 * 1024 * 1024
+        return cache
+    }()
 
     let imageManager = PHCachingImageManager()
 
@@ -58,7 +68,7 @@ final class PhotoLibrary: ObservableObject {
                 var countMap: [SmartCategory: Int] = [:]
                 var coverMap: [SmartCategory: String] = [:]
                 for category in SmartCategory.allCases {
-                    let fetched = PHAsset.fetchAssets(with: category.fetchOptions)
+                    let fetched = category.fetchAssets()
                     countMap[category] = fetched.count
                     if fetched.count > 0 {
                         coverMap[category] = fetched.object(at: 0).localIdentifier
@@ -82,7 +92,7 @@ final class PhotoLibrary: ObservableObject {
         }
         let list = await withCheckedContinuation { (cont: CheckedContinuation<[PHAsset], Never>) in
             DispatchQueue.global(qos: .userInitiated).async {
-                let fetched = PHAsset.fetchAssets(with: category.fetchOptions)
+                let fetched = category.fetchAssets()
                 var array: [PHAsset] = []
                 array.reserveCapacity(fetched.count)
                 fetched.enumerateObjects { asset, _, _ in array.append(asset) }
@@ -99,9 +109,19 @@ final class PhotoLibrary: ObservableObject {
 
     // MARK: - 取图
 
-    /// 加载单张图片。targetSize 传 nil 表示按原图尺寸取。
+    private func cacheKey(_ asset: PHAsset, _ size: CGSize) -> NSString {
+        "\(asset.localIdentifier)#\(Int(size.width.rounded()))x\(Int(size.height.rounded()))" as NSString
+    }
+
+    func cachedImage(for asset: PHAsset, targetSize: CGSize) -> UIImage? {
+        imageCache.object(forKey: cacheKey(asset, targetSize))
+    }
+
+    /// 加载单张图片（一次性返回，适合缩略图）。
     func image(for asset: PHAsset, targetSize: CGSize?) async -> UIImage? {
         let size = targetSize ?? CGSize(width: asset.pixelWidth, height: asset.pixelHeight)
+        let key = cacheKey(asset, size)
+        if let hit = imageCache.object(forKey: key) { return hit }
 
         return await withCheckedContinuation { (cont: CheckedContinuation<UIImage?, Never>) in
             let options = PHImageRequestOptions()
@@ -118,12 +138,68 @@ final class PhotoLibrary: ObservableObject {
                 if let info = info, (info[PHImageCancelledKey] as? Bool) == true { return }
                 guard !resumed else { return }
                 resumed = true
+                if let image {
+                    self.imageCache.setObject(image, forKey: key, cost: self.cost(of: image))
+                }
                 cont.resume(returning: image)
             }
         }
     }
 
-    /// 预取。滑动到第 N 张时，把 N+1、N+2 提前读进缓存，滑起来才不会卡。
+    /// 渐进式加载：先给一张模糊的（立刻显示），再给一张清晰的。
+    /// 全屏浏览用它，滑起来才不会有"空白转圈"的瞬间。
+    func imageStream(for asset: PHAsset, targetSize: CGSize) -> AsyncStream<UIImage> {
+        let key = cacheKey(asset, targetSize)
+
+        if let hit = imageCache.object(forKey: key) {
+            return AsyncStream { continuation in
+                continuation.yield(hit)
+                continuation.finish()
+            }
+        }
+
+        return AsyncStream { continuation in
+            let options = PHImageRequestOptions()
+            options.deliveryMode = .opportunistic
+            options.resizeMode = .fast
+            options.isNetworkAccessAllowed = true
+            options.version = .current
+
+            var requestID: PHImageRequestID = 0
+            requestID = self.imageManager.requestImage(for: asset,
+                                                      targetSize: targetSize,
+                                                      contentMode: .aspectFill,
+                                                      options: options) { image, info in
+                let cancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
+                let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                let failed = info?[PHImageErrorKey] != nil
+
+                if let image {
+                    // 模糊版不进缓存，否则下次打开还是糊的
+                    if !degraded {
+                        self.imageCache.setObject(image, forKey: key, cost: self.cost(of: image))
+                    }
+                    continuation.yield(image)
+                }
+
+                if cancelled || failed || !degraded {
+                    continuation.finish()
+                }
+            }
+
+            continuation.onTermination = { _ in
+                if requestID != 0 {
+                    self.imageManager.cancelImageRequest(requestID)
+                }
+            }
+        }
+    }
+
+    private func cost(of image: UIImage) -> Int {
+        Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+    }
+
+    /// 预取。滑动到第 N 张时，把前后几张提前读进缓存，滑起来才不会卡。
     func preheat(_ assets: [PHAsset], targetSize: CGSize) {
         imageManager.startCachingImages(for: assets,
                                         targetSize: targetSize,
@@ -133,6 +209,41 @@ final class PhotoLibrary: ObservableObject {
 
     func stopPreheat() {
         imageManager.stopCachingImagesForAllAssets()
+    }
+
+    // MARK: - 视频
+
+    /// 取可播放的 AVPlayerItem。
+    /// 先走 requestPlayerItem（最省事）；iCloud 视频这条路径常常拿不到，
+    /// 再退一步用 requestAVAsset 自己拼 AVPlayerItem。
+    func playerItem(for asset: PHAsset) async -> AVPlayerItem? {
+        let options = PHVideoRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .automatic
+
+        let readyItem: AVPlayerItem? = await withCheckedContinuation {
+            (cont: CheckedContinuation<AVPlayerItem?, Never>) in
+            self.imageManager.requestPlayerItem(forVideo: asset, options: options) { result, _ in
+                cont.resume(returning: result)
+            }
+        }
+        if let readyItem { return readyItem }
+
+        let avAsset: AVAsset? = await withCheckedContinuation {
+            (cont: CheckedContinuation<AVAsset?, Never>) in
+            self.imageManager.requestAVAsset(forVideo: asset, options: options) { result, _, _ in
+                cont.resume(returning: result)
+            }
+        }
+        guard let avAsset else { return nil }
+        return AVPlayerItem(asset: avAsset)
+    }
+
+    /// 播放前把音频会话切到 playback，否则手机开了静音开关就没有声音
+    func activatePlaybackAudio() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .moviePlayback)
+        try? session.setActive(true)
     }
 
     // MARK: - 封面
@@ -148,7 +259,7 @@ final class PhotoLibrary: ObservableObject {
                   coverImageCache[id] == nil else { continue }
             let result = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
             guard let asset = result.firstObject else { continue }
-            if let thumb = await self.image(for: asset, targetSize: CGSize(width: 300, height: 300)) {
+            if let thumb = await self.image(for: asset, targetSize: CGSize(width: 400, height: 400)) {
                 await MainActor.run { self.coverImageCache[id] = thumb }
             }
         }
@@ -172,6 +283,7 @@ final class PhotoLibrary: ObservableObject {
 
         await MainActor.run {
             self.listCache.removeAll()
+            self.imageCache.removeAllObjects()
             for id in ids { self.coverImageCache.removeValue(forKey: id) }
         }
     }

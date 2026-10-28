@@ -167,15 +167,28 @@ PhotoSwipe/
 └── PhotoSwipe/
     ├── PhotoSwipeApp.swift          # 入口
     ├── Models/
-    │   ├── SmartCategory.swift      # 7 个分类的 PhotoKit 判定规则
+    │   ├── SmartCategory.swift      # 分类定义（全部/自拍/截屏/实况/视频/全景/人像/喜欢）
     │   └── PendingStore.swift       # 待删队列（持久化）
     ├── Services/
     │   └── PhotoLibrary.swift       # 权限、取图、预取、批量删除
     └── Views/
         ├── RootView.swift           # 权限引导
         ├── CategoryGridView.swift   # 分类网格
-        ├── SwipeViewerView.swift    # 全屏滑动（核心）
+        ├── SwipeViewerView.swift    # 全屏浏览（连续分页 + 上滑待删 + 下滑喜欢）
+        ├── VideoPlayerView.swift    # 视频播放器
         └── TrashView.swift          # 待删列表
 ```
 
 隐私：**所有处理都在手机本地完成，App 没有联网权限，不上传任何照片。**
+
+## v1.1 更新说明
+
+| 改动 | 说明 |
+|---|---|
+| 视频可播放 | 点视频卡片任意位置进入全屏播放，支持 iCloud 视频与静音开关下出声 |
+| 新增「全部」 | 首页顶部横幅，按时间倒序浏览全库，不再只能按分类看 |
+| 新增「自拍」 | 直接读取系统「自拍」智能相簿（`smartAlbumSelfPortraits`），和系统相册结果一致 |
+| 连续滑动 | 左右滑动改为跟手分页：手指拖多少画面走多少，松手按速度吸附到上一张/下一张 |
+
+> 注：分类现在统一从系统智能相簿读取（截屏、实况、视频、全景、人像、喜欢、自拍），
+> 与系统「相簿」页里的那几本完全对应，不再靠自己写条件去猜。
