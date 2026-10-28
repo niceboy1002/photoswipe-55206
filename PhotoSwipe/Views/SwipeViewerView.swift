@@ -124,7 +124,7 @@ struct SwipeViewerView: View {
         let x = CGFloat(i) * pageW - scrollX
         let fade = Double(min(abs(x) / pageW, 1))
 
-        PhotoCard(asset: assets[i], onPlay: playAction(for: i))
+        return PhotoCard(asset: assets[i], onPlay: playAction(for: i))
             .frame(width: cardW, height: cardH)
             .scaleEffect(1 - CGFloat(fade) * 0.06)
             .opacity(1 - fade * 0.45)

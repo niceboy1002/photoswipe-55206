@@ -246,8 +246,8 @@ final class PhotoLibrary: ObservableObject {
             options.isNetworkAccessAllowed = true
             options.version = .current
 
-            var requestID: PHImageRequestID = 0
-            requestID = self.imageManager.requestImage(for: asset,
+            let token = RequestToken()
+            token.id = self.imageManager.requestImage(for: asset,
                                                       targetSize: targetSize,
                                                       contentMode: .aspectFill,
                                                       options: options) { image, info in
@@ -269,8 +269,9 @@ final class PhotoLibrary: ObservableObject {
             }
 
             continuation.onTermination = { _ in
-                if requestID != 0 {
-                    self.imageManager.cancelImageRequest(requestID)
+                let id = token.id
+                if id != 0 {
+                    self.imageManager.cancelImageRequest(id)
                 }
             }
         }
@@ -317,7 +318,7 @@ final class PhotoLibrary: ObservableObject {
             }
         }
         guard let avAsset else { return nil }
-        return AVPlayerItem(asset: avAsset)
+        return await AVPlayerItem(asset: avAsset)
     }
 
     /// 播放前把音频会话切到 playback，否则手机开了静音开关就没有声音
@@ -384,4 +385,11 @@ final class PhotoLibrary: ObservableObject {
             await MainActor.run { self.lastError = error.localizedDescription }
         }
     }
+}
+
+/// 用引用类型装 requestID。
+/// 直接捕获局部 var 会在并发执行时被 Swift 6 判为非法（captured var），
+/// 换成一个小盒子就干净了。
+final class RequestToken {
+    var id: PHImageRequestID = 0
 }
