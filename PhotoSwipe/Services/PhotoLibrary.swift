@@ -13,6 +13,8 @@ final class PhotoLibrary: ObservableObject {
     @Published var covers: [SmartCategory: String] = [:]   // 每个分类第一张的 localIdentifier，用来当封面
     @Published var isLoadingCounts = false
     @Published var lastError: String?
+    /// 按大小排序时的进度 0…1，界面直接读它显示百分比
+    @Published var sortProgress: Double = 0
 
     /// 缓存每个分类的完整列表，避免每次进详情页都重新遍历
     private var listCache: [SmartCategory: [PHAsset]] = [:]
@@ -105,6 +107,85 @@ final class PhotoLibrary: ObservableObject {
 
     func invalidateCache() {
         listCache.removeAll()
+    }
+
+    // MARK: - 排序（按文件大小）
+
+    private let sizeLock = NSLock()
+    private var sizeCache: [String: Int64] = [:]
+
+    /// 已算过的文件大小。排序完成后界面直接读这个，不再重复计算。
+    func cachedFileSize(for asset: PHAsset) -> Int64? {
+        sizeLock.lock()
+        defer { sizeLock.unlock() }
+        return sizeCache[asset.localIdentifier]
+    }
+
+    /// 取单个资源的文件大小。
+    ///
+    /// PhotoKit 没有公开「文件大小」这个属性，只能从 PHAssetResource 上读。
+    /// 这里先 responds(to:) 检查再取值，取不到就返回 0，绝不会因为键不存在而崩。
+    private func fileSize(of asset: PHAsset) -> Int64 {
+        sizeLock.lock()
+        if let hit = sizeCache[asset.localIdentifier] {
+            sizeLock.unlock()
+            return hit
+        }
+        sizeLock.unlock()
+
+        var best: Int64 = 0
+        let key = NSSelectorFromString("fileSize")
+        for resource in PHAssetResource.assetResources(for: asset) {
+            guard resource.responds(to: key),
+                  let number = resource.value(forKey: "fileSize") as? NSNumber else { continue }
+            if number.int64Value > best { best = number.int64Value }
+        }
+
+        sizeLock.lock()
+        sizeCache[asset.localIdentifier] = best
+        sizeLock.unlock()
+        return best
+    }
+
+    /// 按指定顺序取列表。进度写进 sortProgress，界面读它显示百分比。
+    func sortedAssets(for category: SmartCategory, by sort: SortOption) async -> [PHAsset] {
+        let base = await assets(for: category)
+
+        guard sort.needsSize, base.count > 1 else {
+            await MainActor.run { self.sortProgress = 0 }
+            return base
+        }
+
+        let total = base.count
+        return await withCheckedContinuation { (cont: CheckedContinuation<[PHAsset], Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                DispatchQueue.main.async { self.sortProgress = 0 }
+
+                var sized: [(asset: PHAsset, size: Int64, date: Date)] = []
+                sized.reserveCapacity(total)
+
+                for (i, asset) in base.enumerated() {
+                    sized.append((asset,
+                                  self.fileSize(of: asset),
+                                  asset.creationDate ?? Date.distantPast))
+                    if i % 80 == 0 {
+                        let p = Double(i) / Double(total)
+                        DispatchQueue.main.async { self.sortProgress = p }
+                    }
+                }
+
+                sized.sort { lhs, rhs in
+                    if lhs.size != rhs.size {
+                        return sort == .largest ? lhs.size > rhs.size : lhs.size < rhs.size
+                    }
+                    return lhs.date > rhs.date
+                }
+
+                let result = sized.map { $0.asset }
+                DispatchQueue.main.async { self.sortProgress = 1 }
+                cont.resume(returning: result)
+            }
+        }
     }
 
     // MARK: - 取图
@@ -285,6 +366,9 @@ final class PhotoLibrary: ObservableObject {
             self.listCache.removeAll()
             self.imageCache.removeAllObjects()
             for id in ids { self.coverImageCache.removeValue(forKey: id) }
+            self.sizeLock.lock()
+            for id in ids { self.sizeCache.removeValue(forKey: id) }
+            self.sizeLock.unlock()
         }
     }
 

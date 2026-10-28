@@ -27,11 +27,18 @@ struct SwipeViewerView: View {
     @State private var showTrash = false
     @State private var video: VideoSelection?
 
+    /// 排序方式存在本地，下次进任何分类都沿用上次的选择
+    @AppStorage("photoswipe.sortOption") private var sortRaw = SortOption.newest.rawValue
+
     private enum DragAxis { case horizontal, vertical }
 
     private struct VideoSelection: Identifiable {
         let id = UUID()
         let asset: PHAsset
+    }
+
+    private var sort: SortOption {
+        SortOption(rawValue: sortRaw) ?? .newest
     }
 
     var body: some View {
@@ -55,6 +62,9 @@ struct SwipeViewerView: View {
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
         .task { await loadList() }
+        .onChange(of: sortRaw) { _, _ in
+            Task { await reload() }
+        }
         .sheet(isPresented: $showTrash) {
             TrashView()
         }
@@ -76,7 +86,15 @@ struct SwipeViewerView: View {
 
             ZStack {
                 if loading {
-                    ProgressView().tint(.white.opacity(0.5))
+                    VStack(spacing: 14) {
+                        ProgressView().tint(.white.opacity(0.5))
+                        if sort.needsSize, library.sortProgress > 0 {
+                            Text("正在计算文件大小 \(Int(library.sortProgress * 100))%")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.45))
+                                .monospacedDigit()
+                        }
+                    }
                 } else if assets.isEmpty {
                     emptyState
                 } else {
@@ -171,6 +189,26 @@ struct SwipeViewerView: View {
 
             Spacer()
 
+            Menu {
+                ForEach(SortOption.allCases) { option in
+                    Button {
+                        sortRaw = option.rawValue
+                    } label: {
+                        if option == sort {
+                            Label(option.title, systemImage: "checkmark")
+                        } else {
+                            Text(option.title)
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(Color.white.opacity(0.12), in: Circle())
+            }
+
             Button {
                 showTrash = true
             } label: {
@@ -202,7 +240,17 @@ struct SwipeViewerView: View {
 
     private var progressText: String {
         guard !assets.isEmpty else { return "0" }
+        if let size = currentSizeText {
+            return "\(index + 1) / \(assets.count) · \(size)"
+        }
         return "\(index + 1) / \(assets.count)"
+    }
+
+    /// 按大小排序时，顺带把当前这张的体积显示出来
+    private var currentSizeText: String? {
+        guard sort.needsSize, index < assets.count,
+              let bytes = library.cachedFileSize(for: assets[index]), bytes > 0 else { return nil }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
     // MARK: - 底部提示
@@ -425,19 +473,30 @@ struct SwipeViewerView: View {
 
     // MARK: - 数据
 
+    @MainActor
     private func loadList() async {
-        let all = await library.assets(for: category)
+        let list = await library.sortedAssets(for: category, by: sort)
         let queued = Set(PendingStore.shared.ids)
-        let filtered = all.filter { !queued.contains($0.localIdentifier) }
-
-        await MainActor.run {
-            assets = filtered
-            index = 0
-            scrollX = 0
-            dragY = 0
-            loading = false
-        }
+        assets = list.filter { !queued.contains($0.localIdentifier) }
+        index = 0
+        scrollX = 0
+        dragY = 0
+        loading = false
         preheat(pageW: max(UIScreen.main.bounds.width, 1))
+    }
+
+    /// 切换排序后重新取一遍，回到第一张
+    @MainActor
+    private func reload() async {
+        loading = true
+        assets = []
+        index = 0
+        scrollX = 0
+        dragY = 0
+        await loadList()
+        if sort.needsSize {
+            showToast("已按\(sort.shortTitle)排序")
+        }
     }
 
     private func preheat(pageW: CGFloat) {
