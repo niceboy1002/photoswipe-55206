@@ -208,9 +208,13 @@ struct TrashThumb: View {
             .aspectRatio(1, contentMode: .fit)
             .overlay {
                 if let image {
+                    // 和分类格子一样的坑：不框死尺寸的话，宽幅照片会溢出去，
+                    // 盖住隔壁格子的 × 按钮，让那个按钮点不动
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))

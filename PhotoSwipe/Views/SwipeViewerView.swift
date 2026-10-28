@@ -11,6 +11,9 @@ struct SwipeViewerView: View {
 
     @State private var assets: [PHAsset] = []
     @State private var loading = true
+    /// 进度 UI 是否该露面。慢任务才显示，秒开的分类不显示，
+    /// 否则进度条会「闪一下就没」
+    @State private var showLoadingUI = false
     @State private var index = 0
 
     /// 整个横向内容被拖走了多少点。scrollX = index * 页宽 时正好停在第 index 张。
@@ -27,6 +30,10 @@ struct SwipeViewerView: View {
     @State private var showTrash = false
     @State private var video: VideoSelection?
 
+    /// 当前这批里哪些已经是「喜欢」。
+    /// 用它做本地判断，下滑就能变成可撤销的开关，而不是只能单向加。
+    @State private var favoriteIDs: Set<String> = []
+
     /// 排序方式存在本地，下次进任何分类都沿用上次的选择
     @AppStorage("photoswipe.sortOption") private var sortRaw = SortOption.newest.rawValue
 
@@ -39,6 +46,12 @@ struct SwipeViewerView: View {
 
     private var sort: SortOption {
         SortOption(rawValue: sortRaw) ?? .newest
+    }
+
+    /// 当前这张是不是已经标了「喜欢」
+    private func isFavorite(at i: Int) -> Bool {
+        guard i >= 0, i < assets.count else { return false }
+        return favoriteIDs.contains(assets[i].localIdentifier)
     }
 
     var body: some View {
@@ -85,18 +98,28 @@ struct SwipeViewerView: View {
             let cardH = max(geo.size.height, 80)
 
             ZStack {
-                if loading {
+                // 加载态延后 0.16 秒才显示：多数分类是秒开的，
+                // 立刻显示进度条反而会「闪一下就没」，看着像出错
+                if loading && showLoadingUI {
                     VStack(spacing: 14) {
-                        ProgressView().tint(.white.opacity(0.5))
-                        if sort.needsSize, library.sortProgress > 0 {
-                            Text("正在计算文件大小 \(Int(library.sortProgress * 100))%")
+                        if sort.needsSize {
+                            // 换成确定的进度条：转圈 + 百分比一起跳，看着像在闪
+                            ProgressView(value: library.sortProgress)
+                                .progressViewStyle(.linear)
+                                .tint(.white.opacity(0.55))
+                                .frame(width: 168)
+                                .animation(.linear(duration: 0.16), value: library.sortProgress)
+
+                            Text("正在计算文件大小 \(sortPercentText)")
                                 .font(.system(size: 11))
                                 .foregroundStyle(.white.opacity(0.45))
                                 .monospacedDigit()
+                        } else {
+                            ProgressView().tint(.white.opacity(0.5))
                         }
                     }
                 } else if assets.isEmpty {
-                    emptyState
+                    if !loading { emptyState }
                 } else {
                     pager(pageW: pageW, cardW: cardW, cardH: cardH)
                 }
@@ -178,9 +201,20 @@ struct SwipeViewerView: View {
             }
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(category.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                HStack(spacing: 5) {
+                    Text(category.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+
+                    // 已经是「喜欢」的，标题旁挂一颗实心红心，
+                    // 下滑前就能看出来这一下是加还是取消
+                    if isFavorite(at: index) {
+                        Image(systemName: "heart.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.pink)
+                            .transition(.opacity)
+                    }
+                }
                 Text(progressText)
                     .font(.system(size: 10))
                     .foregroundStyle(.white.opacity(0.5))
@@ -246,6 +280,11 @@ struct SwipeViewerView: View {
         return "\(index + 1) / \(assets.count)"
     }
 
+    /// 排序进度的百分比文字，四舍五入到整数
+    private var sortPercentText: String {
+        "\(Int((library.sortProgress * 100).rounded()))%"
+    }
+
     /// 按大小排序时，顺带把当前这张的体积显示出来
     private var currentSizeText: String? {
         guard sort.needsSize, index < assets.count,
@@ -259,7 +298,8 @@ struct SwipeViewerView: View {
         HStack(spacing: 26) {
             hint(icon: "arrow.left.arrow.right", text: "滑动切换")
             hint(icon: "arrow.up", text: "待删")
-            hint(icon: "arrow.down", text: "喜欢")
+            hint(icon: isFavorite(at: index) ? "heart.slash" : "heart",
+                 text: isFavorite(at: index) ? "取消喜欢" : "喜欢")
         }
         .padding(.bottom, 28)
         .opacity(0.55)
@@ -285,9 +325,10 @@ struct SwipeViewerView: View {
                           tint: .red,
                           progress: min(-dragY / (cardH * 0.32), 1))
         } else if dragY > 28 {
-            feedbackBadge(symbol: "heart.fill",
-                          text: "加入喜欢",
-                          tint: .pink,
+            let already = isFavorite(at: index)
+            feedbackBadge(symbol: already ? "heart.slash.fill" : "heart.fill",
+                          text: already ? "取消喜欢" : "加入喜欢",
+                          tint: already ? .gray : .pink,
                           progress: min(dragY / (cardH * 0.32), 1))
         }
     }
@@ -347,7 +388,7 @@ struct SwipeViewerView: View {
                     if value.translation.height < -threshold {
                         markForDeletion(pageW: pageW, cardH: cardH)
                     } else if value.translation.height > threshold {
-                        addToFavorites(pageW: pageW)
+                        toggleFavorite(pageW: pageW)
                     } else {
                         snapBack()
                     }
@@ -439,30 +480,50 @@ struct SwipeViewerView: View {
         }
     }
 
-    /// 下滑：标为系统相册里的「喜欢」，然后自动看下一张
-    private func addToFavorites(pageW: CGFloat) {
+    /// 下滑：在「喜欢」和「取消喜欢」之间切换。
+    /// 手滑标错了，滑回上一张再下滑一次就取消了。
+    private func toggleFavorite(pageW: CGFloat) {
         guard index < assets.count else { return }
         let asset = assets[index]
+        let willFavorite = !favoriteIDs.contains(asset.localIdentifier)
 
         animating = true
-        haptic(style: .light)
+        haptic(style: willFavorite ? .light : .medium)
 
         withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
             dragY = 0
         }
 
         Task { @MainActor in
-            await library.setFavorite(asset, value: true)
-            showToast("已加入「喜欢」")
-            try? await Task.sleep(nanoseconds: 240_000_000)
+            await library.setFavorite(asset, value: willFavorite)
 
-            let target = min(index + 1, assets.count - 1)
-            if target != index {
-                index = target
-                withAnimation(.easeOut(duration: 0.22)) {
-                    scrollX = CGFloat(target) * pageW
+            if willFavorite {
+                favoriteIDs.insert(asset.localIdentifier)
+            } else {
+                favoriteIDs.remove(asset.localIdentifier)
+                // 在「喜欢」分类里取消之后，它就不该再出现在这本相册里了
+                if category == .favorites {
+                    library.forget(localIdentifier: asset.localIdentifier, in: .favorites)
                 }
             }
+            showToast(willFavorite ? "已加入「喜欢」" : "已取消「喜欢」")
+
+            try? await Task.sleep(nanoseconds: 240_000_000)
+
+            if !willFavorite, category == .favorites {
+                // 取消了喜欢，它已经不属于这本相册了
+                dropCurrent(pageW: pageW)
+            } else if willFavorite {
+                // 加入后自动前进一张，节奏不被打断
+                let target = min(index + 1, assets.count - 1)
+                if target != index {
+                    index = target
+                    withAnimation(.easeOut(duration: 0.22)) {
+                        scrollX = CGFloat(target) * pageW
+                    }
+                }
+            }
+            // 取消喜欢时留在原地：方便你确认，想加回来再滑一次就行
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
                 animating = false
@@ -471,16 +532,45 @@ struct SwipeViewerView: View {
         }
     }
 
+    /// 把当前这张从列表里拿掉，顺手把位置和偏移修正到合法范围
+    private func dropCurrent(pageW: CGFloat) {
+        if index < assets.count {
+            assets.remove(at: index)
+        }
+        if assets.isEmpty {
+            index = 0
+            scrollX = 0
+        } else if index >= assets.count {
+            index = assets.count - 1
+            scrollX = CGFloat(index) * pageW
+        }
+    }
+
     // MARK: - 数据
 
     @MainActor
     private func loadList() async {
+        loading = true
+        showLoadingUI = false
+        // 0.16 秒后才允许进度条出现，秒开的分类就完全没有这个中间态
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+            if loading {
+                withAnimation(.easeIn(duration: 0.15)) {
+                    showLoadingUI = true
+                }
+            }
+        }
+
         let list = await library.sortedAssets(for: category, by: sort)
         let queued = Set(PendingStore.shared.ids)
         assets = list.filter { !queued.contains($0.localIdentifier) }
+        // 进来时先把已有的「喜欢」读一遍，之后本地维护，
+        // 这样下手滑下滑不会重复加，而是能取消
+        favoriteIDs = Set(assets.filter { $0.isFavorite }.map { $0.localIdentifier })
         index = 0
         scrollX = 0
         dragY = 0
+        showLoadingUI = false
         loading = false
         preheat(pageW: max(UIScreen.main.bounds.width, 1))
     }
@@ -489,7 +579,9 @@ struct SwipeViewerView: View {
     @MainActor
     private func reload() async {
         loading = true
-        assets = []
+        showLoadingUI = false
+        // 不清空 assets：旧列表先留在屏幕上，等新顺序算好再整体替换，
+        // 中间不会出现黑屏
         index = 0
         scrollX = 0
         dragY = 0

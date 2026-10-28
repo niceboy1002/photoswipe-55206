@@ -15,6 +15,8 @@ final class PhotoLibrary: ObservableObject {
     @Published var lastError: String?
     /// 按大小排序时的进度 0…1，界面直接读它显示百分比
     @Published var sortProgress: Double = 0
+    /// 排序任务的代号，用来丢弃过期的进度回写
+    private var sortGeneration = 0
 
     /// 缓存每个分类的完整列表，避免每次进详情页都重新遍历
     private var listCache: [SmartCategory: [PHAsset]] = [:]
@@ -109,6 +111,12 @@ final class PhotoLibrary: ObservableObject {
         listCache.removeAll()
     }
 
+    /// 某张照片的状态变了（比如取消了「喜欢」），把它从某个分类的缓存里剔掉，
+    /// 下次再进这个分类就不会出现。照片本身不会被动到。
+    func forget(localIdentifier id: String, in category: SmartCategory) {
+        listCache[category]?.removeAll { $0.localIdentifier == id }
+    }
+
     // MARK: - 排序（按文件大小）
 
     private let sizeLock = NSLock()
@@ -156,21 +164,45 @@ final class PhotoLibrary: ObservableObject {
             return base
         }
 
+        // 每次重排都换一个代号。用户连点几下排序时，
+        // 旧的那次遍历跑完不会再回来改进度和界面。
+        let generation: Int = await MainActor.run {
+            self.sortGeneration &+= 1
+            self.sortProgress = 0
+            return self.sortGeneration
+        }
+
         let total = base.count
         return await withCheckedContinuation { (cont: CheckedContinuation<[PHAsset], Never>) in
             DispatchQueue.global(qos: .userInitiated).async {
-                DispatchQueue.main.async { self.sortProgress = 0 }
-
                 var sized: [(asset: PHAsset, size: Int64, date: Date)] = []
                 sized.reserveCapacity(total)
+
+                // 进度节流：只在「整数百分比变了」且「距上次至少 80ms」时才推送。
+                // 之前每 80 张推一次，几万张会在一两秒内推上百次，
+                // 百分比数字肉眼看起来就是在闪。
+                let started = Date.timeIntervalSinceReferenceDate
+                var lastPercent = -1
+                var lastPush = 0.0
 
                 for (i, asset) in base.enumerated() {
                     sized.append((asset,
                                   self.fileSize(of: asset),
                                   asset.creationDate ?? Date.distantPast))
-                    if i % 80 == 0 {
-                        let p = Double(i) / Double(total)
-                        DispatchQueue.main.async { self.sortProgress = p }
+
+                    let now = Date.timeIntervalSinceReferenceDate
+                    // 前 0.3 秒一概不推：全部尺寸都已缓存时整个排序几十毫秒就完了，
+                    // 推送反而会闪一下 0%→100%
+                    guard now - started > 0.3 else { continue }
+
+                    let percent = Int(Double(i) / Double(total) * 100)
+                    if percent != lastPercent, now - lastPush > 0.08 {
+                        lastPercent = percent
+                        lastPush = now
+                        DispatchQueue.main.async {
+                            guard generation == self.sortGeneration else { return }
+                            self.sortProgress = Double(percent) / 100
+                        }
                     }
                 }
 
@@ -182,7 +214,10 @@ final class PhotoLibrary: ObservableObject {
                 }
 
                 let result = sized.map { $0.asset }
-                DispatchQueue.main.async { self.sortProgress = 1 }
+                DispatchQueue.main.async {
+                    guard generation == self.sortGeneration else { return }
+                    self.sortProgress = 0
+                }
                 cont.resume(returning: result)
             }
         }

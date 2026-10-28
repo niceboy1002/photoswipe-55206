@@ -176,9 +176,16 @@ struct CategoryTile: View {
             .aspectRatio(1, contentMode: .fit)
             .overlay {
                 if let cover {
+                    // 这一步是修「点偏」的关键：
+                    // 全景封面的长宽比极端（可能 3:1 甚至更宽），scaledToFill 会横向溢出好几倍。
+                    // 视觉上被外层的 clipShape 裁掉了，但**点击区域不会被裁**，
+                    // 于是它溢出的那部分会盖住左边的「视频」格子，把点击抢走。
+                    // 所以在图片自己身上先框死尺寸再 clipped()，让它根本溢不出去。
                     Image(uiImage: cover)
                         .resizable()
                         .scaledToFill()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
                 }
             }
             .overlay {
@@ -209,6 +216,8 @@ struct CategoryTile: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
             }
+            // 可点区域严格等于这一格自己，隔壁不会再抢
+            .contentShape(Rectangle())
             .opacity(count == 0 ? 0.42 : 1)
     }
 
