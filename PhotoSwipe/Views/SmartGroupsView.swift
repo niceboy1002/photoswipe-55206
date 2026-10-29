@@ -54,8 +54,7 @@ struct AssetThumb: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .fill(Color(red: 0.13, green: 0.13, blue: 0.14))
+            Color(red: 0.13, green: 0.13, blue: 0.14)
 
             if let image {
                 // 尺寸写死再 clipped：宽幅全景不会溢出到隔壁去抢点击
@@ -64,10 +63,18 @@ struct AssetThumb: View {
                     .scaledToFill()
                     .frame(width: side, height: side)
                     .clipped()
+                    // 关键的一行，必须加在图片自己身上：
+                    // scaledToFill 之后图片的实际绘制尺寸会大于格子（竖图是高，横图是宽），
+                    // frame 只限制布局、clipped 只裁画面，两者都不改命中区域。
+                    // 所以图片自己的可点范围要单独钉成正方形，否则溢出的那一截
+                    // 会盖住上下（或左右）相邻的格子，点下去落到别人的照片上。
+                    .contentShape(Rectangle())
             }
         }
         .frame(width: side, height: side)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        // 外层再来一次：把整个格子的可点范围也锁成 side × side
+        .contentShape(Rectangle())
         .task(id: asset?.localIdentifier) {
             guard let asset else { return }
             let pixel = side * UIScreen.main.scale
@@ -168,6 +175,9 @@ struct MonthListView: View {
     @State private var groups: [PhotoGroup] = []
     @State private var loading = true
 
+    /// 点哪个月，那个月就从这一行放大成整页
+    @Namespace private var zoomNS
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -182,8 +192,10 @@ struct MonthListView: View {
                         ForEach(groups) { group in
                             NavigationLink {
                                 SwipeViewerView(title: group.title, assets: group.assets)
+                                    .zoomDestination(id: group.id, in: zoomNS)
                             } label: {
                                 GroupRow(group: group)
+                                    .zoomSource(id: group.id, in: zoomNS)
                             }
                             .buttonStyle(.plain)
                         }
@@ -493,37 +505,53 @@ struct PhotoGridView: View {
 
     @State private var selection: IndexBox?
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 4)
-
-    private var side: CGFloat {
-        max((UIScreen.main.bounds.width - 24 - 6) / 4, 40)
-    }
+    /// 行列参数集中在这里，宽度不再用 UIScreen 猜，
+    /// 而是由 GeometryReader 给的真实宽度算出来。
+    private let spacing: CGFloat = 2
+    private let inset: CGFloat = 12
+    private let columnCount = 4
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(caption)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.white.opacity(0.42))
-                    .padding(.horizontal, 2)
+        GeometryReader { geo in
+            // 向下取整到整点：宁可右边留一点点空白，也不要让每列多出零点几个点，
+            // 四列累积起来就够让一行错位了。
+            let available = geo.size.width - inset * 2 - spacing * CGFloat(columnCount - 1)
+            let side = max((available / CGFloat(columnCount)).rounded(.down), 40)
 
-                LazyVGrid(columns: columns, spacing: 2) {
-                    ForEach(Array(assets.indices), id: \.self) { index in
-                        Button {
-                            selection = IndexBox(index: index)
-                        } label: {
-                            AssetThumb(asset: assets[index], side: side, radius: 2)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(caption)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.white.opacity(0.42))
+                        .padding(.horizontal, 2)
+
+                    LazyVGrid(
+                        columns: Array(
+                            repeating: GridItem(.fixed(side), spacing: spacing),
+                            count: columnCount
+                        ),
+                        spacing: spacing
+                    ) {
+                        ForEach(Array(assets.indices), id: \.self) { index in
+                            Button {
+                                selection = IndexBox(index: index)
+                            } label: {
+                                AssetThumb(asset: assets[index], side: side, radius: 2)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
+                    // 列宽写死后网格总宽会略小于可用宽度，
+                    // 靠左对齐，避免系统把整块居中带来半像素偏移
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .padding(.horizontal, inset)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            .padding(.bottom, 24)
+            .scrollIndicators(.hidden)
         }
         .background(Color.black)
-        .scrollIndicators(.hidden)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $selection) { box in

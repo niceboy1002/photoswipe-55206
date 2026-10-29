@@ -1,31 +1,38 @@
-﻿PhotoSwipe 版本：v15
-打包时间：2026-10-29 22:35（北京时间）
+﻿PhotoSwipe 版本：v16
+打包时间：2026-10-29 23:50（北京时间）
 
 —— 这一版改了什么 ——
 
-只有 1 行代码：
-  PhotoSwipe/Models/PhotoGroup.swift 第 99 行
-  asset.mediaSubtype  ->  asset.mediaSubtypes（补了一个 s）
+1. 点格子错位（过期截屏那个四列照片墙）
+   根因：图片 scaledToFill 到方形格子里，竖图上下会溢出约 1/6 格，
+   而 clipped() 只裁画面、不裁点击区域，于是溢出部分盖住了下一行，
+   点这一格的下半部分，会被下一行那张抢走。
+   改法：每格的可点区域钉死成正方形（contentShape），
+   列宽改用真实宽度精确计算，不再有累积误差。
 
-原因：PhotoKit 里这个属性是复数形式 mediaSubtypes，
-写成单数编译器找不到，连带下一行的 photoScreenshot 也一起报错。
+2. 喜欢之后回上一张，会退两张
+   根因：喜欢后自动前进时，画面位置还在动画途中，
+   手一划就从"半路"起算页号，落点差一格。
+   另外一次快速轻扫最多能翻两页，也容易多退。
+   改法：手势起点改用整数索引；动画结束把位置钉死；
+   一次手势最多翻一张。
 
-对应报错（GitHub Actions run #14 的 Annotations）：
-  PhotoGroup.swift:101:25: error: value of type 'PHAsset' has no member 'mediaSubtype'
-  PhotoGroup.swift:101:48: error: cannot infer contextual base in reference to member 'photoScreenshot'
-
-
-—— 怎么确认你手上的包是 v15 ——
-
-1. 压缩包文件名就叫 PhotoSwipe-v15.zip
-2. 解压后根目录有这份 VERSION.txt，第一行写着 v15
-3. 打开 PhotoSwipe/Models/PhotoGroup.swift，第 99 行能看到 mediaSubtypes（带 s）
-
-以后每次给包都会换版本号（v16、v17……），并更新这份文件里
-的「改了什么」。这样你解压后不用问我，看一眼就知道手里是新的还是旧的。
+3. 新增转场动画
+   首页点相册卡片：卡片放大成整页，返回时缩回原处。
+   按月整理点某个月：同样从那一行放大成整页。
+   这是 iOS 18 的原生缩放转场；iOS 17 上自动退回普通推入动画。
 
 
-—— 如果这一版还是编译失败 ——
+—— 怎么用这个包 ——
 
-去看 GitHub 运行页面上的 Annotations 卡片（不是展开「编译」步骤）。
-把里面以 error: 结尾的那几行复制给我，一行就够定位。
+解压后是这个结构：
+
+  PhotoSwipe-v16/
+    ├── START-HERE.txt      ← 就是你正在读的这份（不用上传）
+    └── upload/             ← 只有这里面的东西要上传
+
+把 upload 文件夹"里面"的全部内容，拖到 GitHub 仓库根目录覆盖。
+注意 .github 是隐藏文件夹，Finder 里按 Cmd + Shift + . 才看得见，
+它这次没有改动，可以不传；但如果之前漏传过，建议一起补上。
+
+打开 upload 里的 VERSION.txt 可以再次确认版本是 v16。

@@ -59,6 +59,12 @@ struct SwipeViewerView: View {
     @State private var dragY: CGFloat = 0
     /// 手势开始时的 scrollX，用来做增量计算
     @State private var startX: CGFloat = 0
+    /// 手势开始时所处的页号（整数）。
+    ///
+    /// 翻页落点必须从这里算，不能再用 `Int(scrollX / pageW)` 反推。
+    /// 喜欢一张后会自动前进，那一瞬间 scrollX 还在动画途中，
+    /// 从浮点数反推会少算一页，松手时就多退一张 —— 正是「回上一张却退回上两张」。
+    @State private var startIndex = 0
     @State private var axis: DragAxis?
     @State private var animating = false
 
@@ -255,8 +261,16 @@ struct SwipeViewerView: View {
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
-            .onAppear { stageSize = geo.size }
-            .onChange(of: geo.size) { _, newValue in stageSize = newValue }
+            .onAppear {
+                stageSize = geo.size
+                // 列表可能在舞台尺寸确定之前就加载完了（那时用的是屏幕宽度）。
+                // 这里按真实宽度再校一次位置，保证 index 和 scrollX 严丝合缝。
+                if !assets.isEmpty { lockToIndex(pageW: geo.size.width) }
+            }
+            .onChange(of: geo.size) { _, newValue in
+                stageSize = newValue
+                if !assets.isEmpty { lockToIndex(pageW: newValue.width) }
+            }
         }
         .padding(.top, 58)
         // 分组模式底部多一条按钮，卡片区要相应让出位置，否则会被压住
@@ -317,9 +331,8 @@ struct SwipeViewerView: View {
     /// 从网格里选了一张：收起网格，落到那一张
     private func jump(to i: Int, pageW: CGFloat) {
         guard !assets.isEmpty else { return }
-        let target = min(max(i, 0), assets.count - 1)
-        index = target
-        scrollX = CGFloat(target) * pageW
+        index = min(max(i, 0), assets.count - 1)
+        lockToIndex(pageW: pageW)
         dragY = 0
         withAnimation(.easeInOut(duration: 0.2)) {
             showGrid = false
@@ -645,6 +658,8 @@ struct SwipeViewerView: View {
                     if abs(t.width) > abs(t.height) * 1.15 {
                         axis = .horizontal
                         startX = scrollX
+                        // 记下这一划是从第几张开始的，松手按它算落点
+                        startIndex = index
                     } else {
                         axis = .vertical
                     }
@@ -753,32 +768,58 @@ struct SwipeViewerView: View {
         // 放大状态下绝不翻页。哪怕前面的判定出了偏差，这里再兜一层。
         guard !isZoomed else { return }
 
-        let startPage = Int((startX / pageW).rounded())
-        let projected = -value.predictedEndTranslation.width / pageW
-        var target = startPage + Int(projected.rounded())
+        // 起点用整数页号，不用 scrollX 反推。
+        // scrollX 是浮点动画值，程序化跳页（喜欢后自动前进）时它还在途中，
+        // 反推就会差一页，表现成「回上一张，却退到了上两张」。
+        let startPage = min(max(startIndex, 0), max(assets.count - 1, 0))
 
-        // 甩得慢但拖得远，也算翻页
-        if target == startPage, abs(value.translation.width) > pageW * 0.18 {
-            target += value.translation.width < 0 ? 1 : -1
+        // 速度预测只用来判断「要不要翻」，不再用它算「翻几页」。
+        // 以前 projected 取整后可能是 ±2，快速一划就跳过一张，
+        // 逐张整理照片时这属于纯失误。
+        let predicted = -value.predictedEndTranslation.width / pageW
+        var step = 0
+        if predicted > 0.42 {
+            step = 1
+        } else if predicted < -0.42 {
+            step = -1
+        } else if abs(value.translation.width) > pageW * 0.18 {
+            // 甩得慢但拖得远，也算翻一页
+            step = value.translation.width < 0 ? 1 : -1
         }
 
-        // 一次手势最多翻两页，避免一下甩过好几张
-        target = min(max(target, startPage - 2), startPage + 2)
-        target = min(max(target, 0), max(assets.count - 1, 0))
+        // 一次手势最多翻一张
+        let target = min(max(startPage + step, 0), max(assets.count - 1, 0))
 
         if target != startPage { haptic() }
 
         animating = true
         index = target
+        startIndex = target
         withAnimation(.interactiveSpring(response: 0.3, dampingFraction: 0.86)) {
             scrollX = CGFloat(target) * pageW
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            scrollX = CGFloat(target) * pageW
+            lockToIndex(pageW: pageW)
             animating = false
             preheat(pageW: pageW)
         }
+    }
+
+    /// 把 index 和 scrollX 钉在同一页上。
+    /// 任何程序化跳页之后都要调一次：只要这两个值有一点偏差，
+    /// 下一次手势的起点就会算错，越滑越偏。
+    private func lockToIndex(pageW: CGFloat) {
+        guard !assets.isEmpty else {
+            index = 0
+            startIndex = 0
+            scrollX = 0
+            return
+        }
+        let i = min(max(index, 0), assets.count - 1)
+        index = i
+        startIndex = i
+        scrollX = CGFloat(i) * pageW
     }
 
     private func snapBack() {
@@ -815,13 +856,7 @@ struct SwipeViewerView: View {
                     assets.remove(at: index)
                 }
             }
-            if assets.isEmpty {
-                index = 0
-                scrollX = 0
-            } else if index >= assets.count {
-                index = assets.count - 1
-                scrollX = CGFloat(index) * pageW
-            }
+            lockToIndex(pageW: pageW)
             animating = false
             showToast("已加入待删 · 共 \(pending.count) 张")
             preheat(pageW: pageW)
@@ -856,24 +891,42 @@ struct SwipeViewerView: View {
             }
             showToast(willFavorite ? "已加入「喜欢」" : "已取消「喜欢」")
 
-            try? await Task.sleep(nanoseconds: 240_000_000)
+            // 等卡片回位再动翻页，两个动画不要叠在一起
+            try? await Task.sleep(nanoseconds: 180_000_000)
 
             if !willFavorite, isFavoritesCategory {
                 // 取消了喜欢，它已经不属于这本相册了
                 dropCurrent(pageW: pageW)
-            } else if willFavorite {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                    lockToIndex(pageW: pageW)
+                    animating = false
+                    preheat(pageW: pageW)
+                }
+                return
+            }
+
+            if willFavorite {
                 // 加入后自动前进一张，节奏不被打断
                 let target = min(index + 1, assets.count - 1)
-                if target != index {
+                withAnimation(.easeOut(duration: 0.24)) {
                     index = target
-                    withAnimation(.easeOut(duration: 0.22)) {
-                        scrollX = CGFloat(target) * pageW
-                    }
+                    startIndex = target
+                    scrollX = CGFloat(target) * pageW
                 }
+                // 动画收尾时把 index 和 scrollX 钉在同一页。
+                // 不钉的话，紧接着这一划会从半路起算，落点差一格 ——
+                // 就是「想回上一张，结果退到了上两张」。
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    lockToIndex(pageW: pageW)
+                    animating = false
+                    preheat(pageW: pageW)
+                }
+                return
             }
-            // 取消喜欢时留在原地：方便你确认，想加回来再滑一次就行
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
+            // 取消喜欢：留在原地，方便你确认刚才那一张
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                lockToIndex(pageW: pageW)
                 animating = false
                 preheat(pageW: pageW)
             }
@@ -885,13 +938,7 @@ struct SwipeViewerView: View {
         if index < assets.count {
             assets.remove(at: index)
         }
-        if assets.isEmpty {
-            index = 0
-            scrollX = 0
-        } else if index >= assets.count {
-            index = assets.count - 1
-            scrollX = CGFloat(index) * pageW
-        }
+        lockToIndex(pageW: pageW)
     }
 
     /// 分组模式：留下当前这张，同组其余全部进待删。
@@ -961,7 +1008,9 @@ struct SwipeViewerView: View {
         }
 
         let ordered = full.filter { keep.contains($0.localIdentifier) && !now.contains($0.localIdentifier) }
-        let pageW = max(UIScreen.main.bounds.width, 1)
+        // 用舞台的真实宽度，不用屏幕宽度：两者在多任务、横屏下会不一致，
+        // 差一点就会让「当前这张」和位置对不上
+        let pageW = stageSize.width > 1 ? stageSize.width : max(UIScreen.main.bounds.width, 1)
         let oldCount = assets.count
 
         assets = ordered
@@ -973,12 +1022,10 @@ struct SwipeViewerView: View {
         if let cid = currentID,
            let i = ordered.firstIndex(where: { $0.localIdentifier == cid }) {
             index = i
-            scrollX = CGFloat(i) * pageW
         } else {
-            let i = min(max(index, 0), max(ordered.count - 1, 0))
-            index = i
-            scrollX = CGFloat(i) * pageW
+            index = min(max(index, 0), max(ordered.count - 1, 0))
         }
+        lockToIndex(pageW: pageW)
 
         dragY = 0
         resetZoom()
@@ -1022,13 +1069,13 @@ struct SwipeViewerView: View {
         favoriteIDs = Set(assets.filter { $0.isFavorite }.map { $0.localIdentifier })
 
         // 从照片墙点进来的，落到点的那一张
-        let pageW = max(UIScreen.main.bounds.width, 1)
+        let pageW = stageSize.width > 1 ? stageSize.width : max(UIScreen.main.bounds.width, 1)
         if let startID, let i = assets.firstIndex(where: { $0.localIdentifier == startID }) {
             index = i
         } else {
             index = min(max(initialIndex, 0), max(assets.count - 1, 0))
         }
-        scrollX = CGFloat(index) * pageW
+        lockToIndex(pageW: pageW)
         dragY = 0
         showLoadingUI = false
         loading = false
@@ -1230,12 +1277,15 @@ struct GridThumb: View {
             Color(red: 0.10, green: 0.10, blue: 0.12)
 
             if let image {
-                // 尺寸写死 + clipped：宽幅全景图不会溢出到隔壁格子去抢点击
+                // 尺寸写死 + clipped：宽幅全景图不会溢出到隔壁格子去抢点击。
+                // 末尾的 contentShape 同样不可省：它管的是图片自己的命中区域，
+                // 外层那个只管整格，管不到溢出来的部分。
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
                     .frame(width: side, height: side)
                     .clipped()
+                    .contentShape(Rectangle())
             }
 
             if asset.mediaType == .video {

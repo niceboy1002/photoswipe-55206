@@ -8,6 +8,50 @@
 
 ---
 
+## v16 — 2026-10-29
+
+### 修复：四列照片墙点错行
+
+`Views/SmartGroupsView.swift` 的 `AssetThumb`：
+
+- 根因：`Image` 用 `scaledToFill()` 填方形格子时，竖图（3:4）会被放大到
+  高 = 格宽 × 4/3，上下各溢出 1/6 格（约 15pt）。
+  `.frame()` 只限制布局、`.clipped()` 只裁剪**绘制**，两者都不改命中测试区域，
+  溢出的那 15pt 仍然可点。SwiftUI 命中测试优先问子视图，于是点这一格的下半部分，
+  会被下一行那张接走。
+- 修复：`Image` 自身和外层各加一道 `.contentShape(Rectangle())`，
+  把图片和整格的可点范围都锁成侧长正方形。
+- 同时把 `PhotoGridView` 的列宽从 `UIScreen` 估算改成 `GeometryReader` + 整数取整，
+  消除四列累积误差。
+
+### 修复：喜欢后回上一张会退两张
+
+`Views/SwipeViewerView.swift`：
+
+- 新增 `startIndex`（手势起点的整数页号），`settle` 用它算落点，
+  不再用 `Int(scrollX / pageW)` 反推浮点位置。
+- 新增 `lockToIndex(pageW:)`，任何程序化跳页（自动前进、跳网格、删除、撤销对账）
+  之后都把 `index` 和 `scrollX` 钉在同一页。
+- `settle` 的速度预测只用来判断「翻不翻」，不再用它算「翻几页」，
+  一次手势最多翻一张。
+- 自动前进的动画收尾时调用 `lockToIndex`，避免下一次手势从半路起算。
+
+### 新增：缩放转场
+
+`Views/ZoomTransition.swift`：
+
+- `zoomSource(id:in:)` / `zoomDestination(id:in:)` 两个扩展，
+  内部用 `#available(iOS 18.0, *)` 包住
+  `matchedTransitionSource(id:in:)` 与 `navigationTransition(.zoom(sourceID:in:))`。
+- 接入位置：首页「全部照片」横幅、首页八个分类卡片、按月整理的月份行。
+- iOS 17 上自动退回系统默认推入动画，不影响编译与运行。
+
+### 打包结构
+
+改成「大包套中包」：外层 `PhotoSwipe-v16/` 放说明，`upload/` 里才是要上传仓库的内容。
+
+---
+
 ## v15 — 2026-10-29
 
 **改了什么**：1 行。

@@ -10,6 +10,9 @@ struct CategoryGridView: View {
 
     @State private var showTrash = false
 
+    /// 缩放转场的身份空间：起点卡片和终点页面靠它配对
+    @Namespace private var zoomNS
+
     private let columns = [
         GridItem(.flexible(), spacing: 10),
         GridItem(.flexible(), spacing: 10),
@@ -45,11 +48,13 @@ struct CategoryGridView: View {
 
                 NavigationLink {
                     SwipeViewerView(category: .all)
+                        .zoomDestination(id: "hero-all", in: zoomNS)
                 } label: {
                     AllPhotosHero(
                         count: library.counts[.all] ?? 0,
                         cover: library.coverImage(for: .all)
                     )
+                    .zoomSource(id: "hero-all", in: zoomNS)
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 16)
@@ -99,12 +104,15 @@ struct CategoryGridView: View {
                     ForEach(SmartCategory.gridCases) { category in
                         NavigationLink {
                             SwipeViewerView(category: category)
+                                .zoomDestination(id: category.rawValue, in: zoomNS)
                         } label: {
                             CategoryTile(
                                 category: category,
                                 count: library.counts[category] ?? 0,
                                 cover: library.coverImage(for: category)
                             )
+                            // 点哪一格，哪一格就长大成整页
+                            .zoomSource(id: category.rawValue, in: zoomNS)
                         }
                         .buttonStyle(.plain)
                     }
@@ -236,12 +244,14 @@ struct CategoryTile: View {
                     // 全景封面的长宽比极端（可能 3:1 甚至更宽），scaledToFill 会横向溢出好几倍。
                     // 视觉上被外层的 clipShape 裁掉了，但**点击区域不会被裁**，
                     // 于是它溢出的那部分会盖住左边的「视频」格子，把点击抢走。
-                    // 所以在图片自己身上先框死尺寸再 clipped()，让它根本溢不出去。
+                    // 所以在图片自己身上先框死尺寸再 clipped()，再补一层 contentShape，
+                    // 让图片自身和整格的可点范围都严格等于这一格。
                     Image(uiImage: cover)
                         .resizable()
                         .scaledToFill()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipped()
+                        .contentShape(Rectangle())
                 }
             }
             .overlay {
