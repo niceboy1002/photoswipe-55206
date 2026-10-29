@@ -1,0 +1,31 @@
+﻿PhotoSwipe 版本：v15
+打包时间：2026-10-29 22:35（北京时间）
+
+—— 这一版改了什么 ——
+
+只有 1 行代码：
+  PhotoSwipe/Models/PhotoGroup.swift 第 99 行
+  asset.mediaSubtype  ->  asset.mediaSubtypes（补了一个 s）
+
+原因：PhotoKit 里这个属性是复数形式 mediaSubtypes，
+写成单数编译器找不到，连带下一行的 photoScreenshot 也一起报错。
+
+对应报错（GitHub Actions run #14 的 Annotations）：
+  PhotoGroup.swift:101:25: error: value of type 'PHAsset' has no member 'mediaSubtype'
+  PhotoGroup.swift:101:48: error: cannot infer contextual base in reference to member 'photoScreenshot'
+
+
+—— 怎么确认你手上的包是 v15 ——
+
+1. 压缩包文件名就叫 PhotoSwipe-v15.zip
+2. 解压后根目录有这份 VERSION.txt，第一行写着 v15
+3. 打开 PhotoSwipe/Models/PhotoGroup.swift，第 99 行能看到 mediaSubtypes（带 s）
+
+以后每次给包都会换版本号（v16、v17……），并更新这份文件里
+的「改了什么」。这样你解压后不用问我，看一眼就知道手里是新的还是旧的。
+
+
+—— 如果这一版还是编译失败 ——
+
+去看 GitHub 运行页面上的 Annotations 卡片（不是展开「编译」步骤）。
+把里面以 error: 结尾的那几行复制给我，一行就够定位。

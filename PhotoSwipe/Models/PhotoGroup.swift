@@ -13,32 +13,16 @@ enum GroupKind: String {
 
     var title: String {
         switch self {
-        case .burst:         return "连拍"
-        case .similar:       return "相似照片"
-        case .month:         return "按月"
-        case .oldScreenshot: return "过期截屏"
-        case .blurry:        return "可能拍糊"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .burst:         return "burst.fill"
-        case .similar:       return "photo.stack"
-        case .month:         return "calendar"
-        case .oldScreenshot: return "clock.arrow.circlepath"
-        case .blurry:        return "camera.filters"
-        }
-    }
-
-    /// 金色 / 紫色 / 青色 / 橙色 / 粉色，给分组行做点缀
-    var tintHex: String {
-        switch self {
-        case .burst:         return "#C9A227"
-        case .similar:       return "#6B5BD2"
-        case .month:         return "#2F8F9D"
-        case .oldScreenshot: return "#C97B2F"
-        case .blurry:        return "#C0557A"
+        case .burst:
+            return "连拍"
+        case .similar:
+            return "相似照片"
+        case .month:
+            return "按月"
+        case .oldScreenshot:
+            return "过期截屏"
+        case .blurry:
+            return "可能拍糊"
         }
     }
 }
@@ -50,44 +34,56 @@ struct PhotoGroup: Identifiable {
     let subtitle: String
     let assets: [PHAsset]
 
-    var count: Int { assets.count }
+    /// 显式写出来，不依赖编译器合成的成员初始化器
+    init(id: String, kind: GroupKind, title: String, subtitle: String, assets: [PHAsset]) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.subtitle = subtitle
+        self.assets = assets
+    }
+
+    var count: Int {
+        return assets.count
+    }
 }
 
 extension PhotoGroup {
     /// 按「年 + 月」切分。传入的列表本来就是按拍摄时间倒序的，
     /// 所以这里保持插入顺序，出来天然也是最新的月份在最前。
     static func months(from assets: [PHAsset]) -> [PhotoGroup] {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = .current
+        var calendar = Calendar(identifier: Calendar.Identifier.gregorian)
+        calendar.timeZone = TimeZone.current
 
         var buckets: [Int: [PHAsset]] = [:]
         var order: [Int] = []
 
         for asset in assets {
             guard let date = asset.creationDate else { continue }
-            let parts = calendar.dateComponents([.year, .month], from: date)
+            let parts = calendar.dateComponents([Calendar.Component.year, Calendar.Component.month], from: date)
             guard let y = parts.year, let m = parts.month else { continue }
-            let key = y * 100 + m
-            if buckets[key] == nil { order.append(key) }
+            let key: Int = y * 100 + m
+            if buckets[key] == nil {
+                order.append(key)
+            }
             buckets[key, default: []].append(asset)
         }
 
         var result: [PhotoGroup] = []
         result.reserveCapacity(order.count)
+
         for key in order {
-            guard let list = buckets[key], !list.isEmpty else { continue }
-            let year = key / 100
-            let month = key % 100
-            result.append(
-                PhotoGroup(
-                    id: "month:\(key)",
-                    kind: .month,
-                    title: "\(year) 年 \(month) 月",
-                    subtitle: "\(list.count) 张",
-                    assets: list
-                )
-            )
+            guard let list = buckets[key] else { continue }
+            let year: Int = key / 100
+            let month: Int = key % 100
+            let group = PhotoGroup(id: "month:\(key)",
+                                   kind: GroupKind.month,
+                                   title: "\(year) 年 \(month) 月",
+                                   subtitle: "\(list.count) 张",
+                                   assets: list)
+            result.append(group)
         }
+
         return result
     }
 
@@ -95,19 +91,23 @@ extension PhotoGroup {
     /// 截屏是最典型的「拍完就忘」——文档、验证码、聊天记录截图，
     /// 过了三个月几乎没有回看价值，堆在一起却非常占地方。
     static func oldScreenshots(from assets: [PHAsset], days: Int = 90) -> PhotoGroup? {
-        let cutoff = Date().addingTimeInterval(-Double(days) * 86400)
-        let list = assets.filter { asset in
-            guard asset.mediaType == .image else { return false }
-            guard asset.mediaSubtype.contains(.photoScreenshot) else { return false }
-            return (asset.creationDate ?? .distantPast) < cutoff
+        let cutoff: Date = Date().addingTimeInterval(-Double(days) * 86400.0)
+
+        var list: [PHAsset] = []
+        for asset in assets {
+            guard asset.mediaType == PHAssetMediaType.image else { continue }
+            guard asset.mediaSubtypes.contains(PHAssetMediaSubtype.photoScreenshot) else { continue }
+            let date: Date = asset.creationDate ?? Date.distantPast
+            guard date < cutoff else { continue }
+            list.append(asset)
         }
+
         guard !list.isEmpty else { return nil }
-        return PhotoGroup(
-            id: "oldscreenshot",
-            kind: .oldScreenshot,
-            title: "90 天前的截屏",
-            subtitle: "\(list.count) 张 · 保留最近三个月的",
-            assets: list
-        )
+
+        return PhotoGroup(id: "oldscreenshot",
+                          kind: GroupKind.oldScreenshot,
+                          title: "90 天前的截屏",
+                          subtitle: "\(list.count) 张 · 保留最近三个月的",
+                          assets: list)
     }
 }
