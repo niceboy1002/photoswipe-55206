@@ -12,6 +12,9 @@ struct TrashView: View {
     @State private var deleting = false
     @State private var errorMessage: String?
     @State private var showError = false
+    /// 队列加起来多大。0 且 computing 为真时显示「计算中」
+    @State private var totalBytes: Int64 = 0
+    @State private var computingBytes = true
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 4)
 
@@ -26,9 +29,13 @@ struct TrashView: View {
                     emptyState
                 } else {
                     ScrollView {
+                        sizeCard
+                            .padding(.horizontal, 12)
+                            .padding(.top, 4)
+                            .padding(.bottom, 10)
+
                         notice
                             .padding(.horizontal, 16)
-                            .padding(.top, 4)
                             .padding(.bottom, 12)
 
                         LazyVGrid(columns: columns, spacing: 3) {
@@ -68,6 +75,61 @@ struct TrashView: View {
     }
 
     // MARK: - 子视图
+
+    /// 顶部「删掉这批能腾出多少空间」。
+    /// 这是整个 App 唯一的量化回报，放在最上面，比任何说明都直接。
+    private var sizeCard: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("这批删掉，可释放")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.5))
+
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(sizeText)
+                        .font(.system(size: 27, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    if computingBytes {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .tint(.white.opacity(0.5))
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            VStack(spacing: 2) {
+                Text("\(assets.count)")
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                Text("张")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.45))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            LinearGradient(
+                colors: [Color(red: 0.20, green: 0.13, blue: 0.16),
+                         Color(red: 0.11, green: 0.11, blue: 0.13)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5)
+        }
+    }
+
+    private var sizeText: String {
+        if computingBytes && totalBytes == 0 { return "计算中…" }
+        if totalBytes <= 0 { return "未知" }
+        return ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+    }
 
     private var notice: some View {
         HStack(spacing: 8) {
@@ -154,6 +216,17 @@ struct TrashView: View {
             assets = ordered
             loading = false
         }
+        await refreshBytes()
+    }
+
+    /// 重新汇总体积。删除流程一行没改，这里只是在旁边看一眼大小。
+    private func refreshBytes() async {
+        computingBytes = true
+        let bytes = await library.totalBytes(for: pending.ids)
+        await MainActor.run {
+            totalBytes = bytes
+            computingBytes = false
+        }
     }
 
     private func remove(_ asset: PHAsset) {
@@ -161,6 +234,7 @@ struct TrashView: View {
         withAnimation(.easeOut(duration: 0.2)) {
             assets.removeAll { $0.localIdentifier == asset.localIdentifier }
         }
+        Task { await refreshBytes() }
     }
 
     private func deleteAll() {

@@ -16,6 +16,22 @@ struct CategoryGridView: View {
         GridItem(.flexible(), spacing: 10)
     ]
 
+    private let smartColumns = [
+        GridItem(.flexible(), spacing: 8),
+        GridItem(.flexible(), spacing: 8)
+    ]
+
+    private func sectionHeader(_ text: String) -> some View {
+        HStack {
+            Text(text)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.45))
+            Spacer()
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 18)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -38,6 +54,46 @@ struct CategoryGridView: View {
                 .buttonStyle(.plain)
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
+
+                sectionHeader("智能整理")
+
+                LazyVGrid(columns: smartColumns, spacing: 8) {
+                    NavigationLink {
+                        SimilarGroupsView()
+                    } label: {
+                        SmartTile(icon: "photo.stack", title: "相似 / 连拍",
+                                  subtitle: "自动成组，一次清一组", tint: Color(hex: "#8B7BE8") ?? .purple)
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink {
+                        MonthListView()
+                    } label: {
+                        SmartTile(icon: "calendar", title: "按月整理",
+                                  subtitle: "一个月一个月过", tint: Color(hex: "#4FB8C4") ?? .teal)
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink {
+                        OldScreenshotsView()
+                    } label: {
+                        SmartTile(icon: "clock.arrow.circlepath", title: "过期截屏",
+                                  subtitle: "90 天前的", tint: Color(hex: "#D89A5A") ?? .orange)
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink {
+                        BlurryPhotosView()
+                    } label: {
+                        SmartTile(icon: "camera.filters", title: "可能拍糊",
+                                  subtitle: "自动挑虚焦的", tint: Color(hex: "#D97C99") ?? .pink)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+                sectionHeader("分类")
 
                 LazyVGrid(columns: columns, spacing: 10) {
                     ForEach(SmartCategory.gridCases) { category in

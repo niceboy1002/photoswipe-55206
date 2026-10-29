@@ -25,10 +25,14 @@ final class PhotoLibrary: ObservableObject {
 
     /// 解码后的图片缓存。滑动时同一张图会被反复创建/销毁视图，
     /// 有这层缓存就不会每次都闪一下转圈。
+    ///
+    /// countLimit 给得比较宽：缩略图总览一次会加载几十张小图，
+    /// 如果只留 60 个位置，全屏大图会被挤掉，
+    /// 从网格点回大图就要重新解码，那一下会闪。
     private let imageCache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
-        cache.countLimit = 60
-        cache.totalCostLimit = 120 * 1024 * 1024
+        cache.countLimit = 240
+        cache.totalCostLimit = 160 * 1024 * 1024
         return cache
     }()
 
@@ -115,6 +119,56 @@ final class PhotoLibrary: ObservableObject {
     /// 下次再进这个分类就不会出现。照片本身不会被动到。
     func forget(localIdentifier id: String, in category: SmartCategory) {
         listCache[category]?.removeAll { $0.localIdentifier == id }
+    }
+
+    /// 只保留系统里还存在的那些，顺序不变。
+    ///
+    /// 批量删除之后，浏览页手里那份列表里还留着已经被删掉的资源。
+    /// 不剔掉的话，滑到那一张会是一片空白，而且位置算不准。
+    func existing(_ assets: [PHAsset]) async -> [PHAsset] {
+        guard !assets.isEmpty else { return [] }
+        let ids = assets.map { $0.localIdentifier }
+
+        let alive: Set<String> = await withCheckedContinuation { (cont: CheckedContinuation<Set<String>, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var found = Set<String>()
+                found.reserveCapacity(ids.count)
+                // 一次查太多 id 也会慢，按 500 个一批
+                var index = 0
+                while index < ids.count {
+                    let slice = Array(ids[index..<min(index + 500, ids.count)])
+                    let fetched = PHAsset.fetchAssets(withLocalIdentifiers: slice, options: nil)
+                    fetched.enumerateObjects { asset, _, _ in found.insert(asset.localIdentifier) }
+                    index += 500
+                }
+                cont.resume(returning: found)
+            }
+        }
+
+        return assets.filter { alive.contains($0.localIdentifier) }
+    }
+
+    // MARK: - 体积合计
+
+    /// 队列里这批照片加起来多大。
+    ///
+    /// 用的是排序时那套 `PHAssetResource` 取值，值本身有缓存，
+    /// 所以第二次算（比如撤掉一张之后）是瞬时的。
+    func totalBytes(for ids: [String]) async -> Int64 {
+        guard !ids.isEmpty else { return 0 }
+        return await withCheckedContinuation { (cont: CheckedContinuation<Int64, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var total: Int64 = 0
+                var index = 0
+                while index < ids.count {
+                    let slice = Array(ids[index..<min(index + 300, ids.count)])
+                    let fetched = PHAsset.fetchAssets(withLocalIdentifiers: slice, options: nil)
+                    fetched.enumerateObjects { asset, _, _ in total += self.fileSize(of: asset) }
+                    index += 300
+                }
+                cont.resume(returning: total)
+            }
+        }
     }
 
     // MARK: - 排序（按文件大小）
@@ -225,8 +279,21 @@ final class PhotoLibrary: ObservableObject {
 
     // MARK: - 取图
 
+    /// 把请求尺寸归一到 16 的倍数。
+    ///
+    /// 浏览页用 `cardW × cardH` 算预取尺寸，卡片自己用 `geo.size` 请求，
+    /// 两者经常差几个像素。差几个像素就是两个不同的缓存 key ——
+    /// 预取等于白做，每滑一张还要重新解码，手感上就是卡。
+    private func normalized(_ size: CGSize) -> CGSize {
+        let step: CGFloat = 16
+        let w = max((size.width / step).rounded(.up) * step, step)
+        let h = max((size.height / step).rounded(.up) * step, step)
+        return CGSize(width: w, height: h)
+    }
+
     private func cacheKey(_ asset: PHAsset, _ size: CGSize) -> NSString {
-        "\(asset.localIdentifier)#\(Int(size.width.rounded()))x\(Int(size.height.rounded()))" as NSString
+        let s = normalized(size)
+        return "\(asset.localIdentifier)#\(Int(s.width))x\(Int(s.height))" as NSString
     }
 
     func cachedImage(for asset: PHAsset, targetSize: CGSize) -> UIImage? {
@@ -235,7 +302,8 @@ final class PhotoLibrary: ObservableObject {
 
     /// 加载单张图片（一次性返回，适合缩略图）。
     func image(for asset: PHAsset, targetSize: CGSize?) async -> UIImage? {
-        let size = targetSize ?? CGSize(width: asset.pixelWidth, height: asset.pixelHeight)
+        let raw = targetSize ?? CGSize(width: asset.pixelWidth, height: asset.pixelHeight)
+        let size = normalized(raw)
         let key = cacheKey(asset, size)
         if let hit = imageCache.object(forKey: key) { return hit }
 
@@ -265,7 +333,8 @@ final class PhotoLibrary: ObservableObject {
     /// 渐进式加载：先给一张模糊的（立刻显示），再给一张清晰的。
     /// 全屏浏览用它，滑起来才不会有"空白转圈"的瞬间。
     func imageStream(for asset: PHAsset, targetSize: CGSize) -> AsyncStream<UIImage> {
-        let key = cacheKey(asset, targetSize)
+        let size = normalized(targetSize)
+        let key = cacheKey(asset, size)
 
         if let hit = imageCache.object(forKey: key) {
             return AsyncStream { continuation in
@@ -283,7 +352,7 @@ final class PhotoLibrary: ObservableObject {
 
             let token = RequestToken()
             token.id = self.imageManager.requestImage(for: asset,
-                                                      targetSize: targetSize,
+                                                      targetSize: size,
                                                       contentMode: .aspectFill,
                                                       options: options) { image, info in
                 let cancelled = (info?[PHImageCancelledKey] as? Bool) ?? false
@@ -319,7 +388,7 @@ final class PhotoLibrary: ObservableObject {
     /// 预取。滑动到第 N 张时，把前后几张提前读进缓存，滑起来才不会卡。
     func preheat(_ assets: [PHAsset], targetSize: CGSize) {
         imageManager.startCachingImages(for: assets,
-                                        targetSize: targetSize,
+                                        targetSize: normalized(targetSize),
                                         contentMode: .aspectFill,
                                         options: nil)
     }
