@@ -2,6 +2,7 @@ import Foundation
 import Photos
 import UIKit
 import AVFoundation
+import Combine
 
 /// PhotoKit 的唯一入口。
 /// 所有重活（遍历、取图、删除）都丢到后台队列，主线程只负责刷新 UI。

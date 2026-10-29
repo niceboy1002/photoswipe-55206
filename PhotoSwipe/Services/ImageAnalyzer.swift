@@ -2,6 +2,7 @@ import Foundation
 import Photos
 import UIKit
 import CoreGraphics
+import Combine
 
 /// 一张照片的「指纹」。
 /// hash 是感知哈希（dHash），blur 是拉普拉斯方差（越小越糊）。
@@ -376,7 +377,7 @@ extension ImageAnalyzer {
         // 像素运算放到后台队列，主线程只负责等结果
         let values: (UInt64, Float)? = await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
-                continuation.resume(returning: analyse(cg))
+                continuation.resume(returning: Self.analyse(cg))
             }
         }
         guard let values else { return nil }
@@ -429,7 +430,7 @@ extension ImageAnalyzer {
         // 注意：必须让 CGContext 和绘制都在 withUnsafeMutableBytes 里完成。
         // 如果只把 &buffer 交给 CGContext、出了闭包再绘制，
         // 那块内存已经失效了，画进去的是野指针。
-        buffer.withUnsafeMutableBytes { raw in
+        buffer.withUnsafeMutableBytes { (raw: UnsafeMutableRawBufferPointer) -> Void in
             guard let base = raw.baseAddress,
                   let context = CGContext(
                     data: base,

@@ -235,7 +235,7 @@ struct SimilarGroupsView: View {
             Color.black.ignoresSafeArea()
 
             if analyzer.running {
-                AnalysisProgressView(analyzer: analyzer) { analyzer.stop() }
+                AnalysisProgressView(analyzer: analyzer, onCancel: { analyzer.stop() })
             } else if loading {
                 ProgressView().tint(.white.opacity(0.5))
             } else if groups.isEmpty {
@@ -327,14 +327,18 @@ struct SimilarGroupsView: View {
 
         // 已经进了待删队列的那几张不该再算进组里；
         // 一整组都进队列了，这一组就不再显示
-        let visible: [PhotoGroup] = raw.compactMap { group in
+        var visible: [PhotoGroup] = []
+        visible.reserveCapacity(raw.count)
+        for group in raw {
             let left = group.assets.filter { !queued.contains($0.localIdentifier) }
-            guard left.count >= 2 else { return nil }
-            return PhotoGroup(id: group.id,
-                              kind: group.kind,
-                              title: "\(group.kind.title) · \(left.count) 张",
-                              subtitle: group.subtitle,
-                              assets: left)
+            guard left.count >= 2 else { continue }
+            visible.append(
+                PhotoGroup(id: group.id,
+                           kind: group.kind,
+                           title: "\(group.kind.title) · \(left.count) 张",
+                           subtitle: group.subtitle,
+                           assets: left)
+            )
         }
 
         await MainActor.run {
@@ -417,7 +421,7 @@ struct BlurryPhotosView: View {
             if analyzer.running {
                 ZStack {
                     Color.black.ignoresSafeArea()
-                    AnalysisProgressView(analyzer: analyzer) { analyzer.stop() }
+                    AnalysisProgressView(analyzer: analyzer, onCancel: { analyzer.stop() })
                 }
             } else if loading {
                 ZStack {

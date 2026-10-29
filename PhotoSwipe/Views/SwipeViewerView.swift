@@ -944,8 +944,8 @@ struct SwipeViewerView: View {
         // 完整有序列表。分组、月份也用这份，不再按分类重新遍历；
         // existing 会把已经被真删掉的剔出去，避免滑到一张空图
         var full = baseList
-        if full.isEmpty, let category {
-            full = await library.sortedAssets(for: category, by: sort)
+        if full.isEmpty, let cat = category {
+            full = await library.sortedAssets(for: cat, by: sort)
         }
         full = await library.existing(full)
         let fullIDs = Set(full.map { $0.localIdentifier })

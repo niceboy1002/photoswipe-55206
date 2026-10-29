@@ -72,18 +72,23 @@ extension PhotoGroup {
             buckets[key, default: []].append(asset)
         }
 
-        return order.compactMap { key in
-            guard let list = buckets[key], !list.isEmpty else { return nil }
+        var result: [PhotoGroup] = []
+        result.reserveCapacity(order.count)
+        for key in order {
+            guard let list = buckets[key], !list.isEmpty else { continue }
             let year = key / 100
             let month = key % 100
-            return PhotoGroup(
-                id: "month:\(key)",
-                kind: .month,
-                title: "\(year) 年 \(month) 月",
-                subtitle: "\(list.count) 张",
-                assets: list
+            result.append(
+                PhotoGroup(
+                    id: "month:\(key)",
+                    kind: .month,
+                    title: "\(year) 年 \(month) 月",
+                    subtitle: "\(list.count) 张",
+                    assets: list
+                )
             )
         }
+        return result
     }
 
     /// 90 天前的截屏。
