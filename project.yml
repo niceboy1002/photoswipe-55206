@@ -15,6 +15,13 @@ settings:
     SWIFT_STRICT_CONCURRENCY: minimal
     ENABLE_USER_SCRIPT_SANDBOXING: "NO"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    # 关掉全模块优化。
+    # 默认 Release 会把 13 个文件塞进一个 swiftc 进程做 WMO，
+    # 而 SwiftUI 的 @ViewBuilder 泛型嵌套极深，全模块类型检查的内存开销
+    # 会直接把这台 3 核 / 7G 的 runner 撑爆 —— 表现就是编译命令跑到一半
+    # 被系统杀掉，日志里连一条 error 都没有，只剩 BUILD FAILED。
+    # 改成按文件编译，内存占用降一个数量级，产物性能差别很小。
+    SWIFT_COMPILATION_MODE: singlefile
 
 targets:
   PhotoSwipe:
