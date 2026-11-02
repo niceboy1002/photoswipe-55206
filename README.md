@@ -24,7 +24,7 @@
 > 这个项目没有订阅、没有广告、没有服务器、不申请网络权限——**你的照片永远不会离开你的手机**。
 
 > [!TIP]
-> **没有 Mac 也能装！** 全程只需要：Fork 本仓库 → GitHub Actions 云端编译 8 分钟 → [Sideloadly](https://sideloadly.io) 签名安装。详见 [部署章节](#-自己部署与生成-ipa)。
+> **不用编译、不用 Mac！** 仓库根目录已附带编译好的未签名 `PhotoSwipe.ipa`，直接下载 → 自签安装即可。想自己动手编译的看 [部署章节](#-自己部署与生成-ipa)。
 
 ---
 
@@ -45,13 +45,12 @@ PhotoSwipe 读取 iPhone 相册，你只需要**全屏滑动**：上滑进待删
 
 ## 🚀 快速开始（不需要 Mac）
 
-1. **Fork 本仓库**
-2. 打开 `Actions` → 选择 `Build IPA` → `Run workflow`
-3. 约 8 分钟后，在该次运行底部 `Artifacts` 下载 `PhotoSwipe-IPA`
-4. 解压得到 `PhotoSwipe.ipa`，用 [Sideloadly](https://sideloadly.io) + 你的 Apple ID 签名安装
+1. **下载 IPA**：仓库根目录已附带编译好的未签名 `PhotoSwipe.ipa`，直接下载
+2. **自签安装**：使用自签工具（免费 Apple ID 即可）将 IPA 签名后安装到 iPhone
+3. 想自己编译也可以：Fork 本仓库 → `Actions` → `Build IPA` → `Run workflow` → 约 8 分钟后从 `Artifacts` 下载
 
 > [!WARNING]
-> 免费 Apple ID 签名的应用 **7 天后过期**（Apple 官方限制，不是程序缺陷）。续签：重新用 Sideloadly 装一次即可，数据不丢。安装提示「不受信任的开发者」时：`设置 → 通用 → VPN与设备管理 → 信任开发者`。
+> 免费 Apple ID 自签安装的应用 **7 天后过期**（Apple 官方限制，不是程序缺陷）。续签：重新自签安装一次即可，数据不丢。安装提示「不受信任的开发者」时：`设置 → 通用 → VPN与设备管理 → 信任开发者`。
 
 ## 📖 完整文档
 
@@ -162,7 +161,7 @@ PhotoSwipe 读取 iPhone 相册，你只需要**全屏滑动**：上滑进待删
 1. **Fork 本仓库**到自己的 GitHub 账号
 2. 进入 `Actions` 标签页，左侧选择 `Build IPA`，点击右侧 `Run workflow`
 3. 等待约 8 分钟，绿色对勾后进入该次记录，底部 `Artifacts` 下载 `PhotoSwipe-IPA`
-4. 解压得到 `PhotoSwipe.ipa`，用 [Sideloadly](https://sideloadly.io) 载入，填写 Apple ID，点击 `Start`
+4. 解压得到 `PhotoSwipe.ipa`（或直接使用仓库根目录附带的 `PhotoSwipe.ipa`），使用自签工具签名后安装到 iPhone
 
 ### 不确定怎么做时
 
@@ -172,12 +171,12 @@ PhotoSwipe 读取 iPhone 相册，你只需要**全屏滑动**：上滑进待删
 我有一个 iOS 项目的源码在 GitHub 上（Swift + SwiftUI，用 XcodeGen 管理工程，
 仓库里带 .github/workflows/build.yml）。我没有 Mac，只有 Windows 电脑。
 请给我一份详细步骤：如何 fork 这个仓库、用 GitHub Actions 编译出未签名的 IPA、
-下载 artifact，再用 Sideloadly 安装到 iPhone 上。每一步说明我会看到什么界面。
+下载 artifact，再自签安装到 iPhone 上。每一步说明我会看到什么界面。
 ```
 
 ### 签名有效期
 
-免费 Apple ID 签名有效期为 **7 天**，到期后图标点击会闪退（Apple 对免费开发者的限制，不是缺陷）。续签只需重新用 Sideloadly 安装一次，本地数据不会丢失。
+免费 Apple ID 自签安装有效期为 **7 天**，到期后图标点击会闪退（Apple 对免费开发者的限制，不是缺陷）。续签只需重新自签安装一次，本地数据不会丢失。
 
 ---
 
