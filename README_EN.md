@@ -24,7 +24,7 @@
 > This project has no subscription, no ads, no server, and requests no network permission — **your photos never leave your device**.
 
 > [!TIP]
-> **No Mac needed!** The whole flow is: Fork this repo → GitHub Actions cloud build (~8 min) → sign with [Sideloadly](https://sideloadly.io). See [Build Your Own IPA](#-build-your-own-ipa).
+> **No build needed, no Mac needed!** An unsigned, pre-built `PhotoSwipe.ipa` is included at the repository root — just download it and self-sign to install. If you want to build it yourself, see [Build Your Own IPA](#-build-your-own-ipa).
 
 ---
 
@@ -45,13 +45,12 @@ PhotoSwipe reads your iPhone photo library and all you do is **swipe in full scr
 
 ## 🚀 Quick Start (No Mac Required)
 
-1. **Fork this repository**
-2. Open `Actions` → select `Build IPA` → `Run workflow`
-3. After ~8 minutes, download `PhotoSwipe-IPA` from the run's `Artifacts`
-4. Unzip to get `PhotoSwipe.ipa`, then sign with [Sideloadly](https://sideloadly.io) using your Apple ID
+1. **Download the IPA**: an unsigned, pre-built `PhotoSwipe.ipa` is included at the repository root — just download it
+2. **Self-sign and install**: use a self-signing tool (a free Apple ID works) to sign the IPA and install it on your iPhone
+3. Or build it yourself: Fork this repo → `Actions` → `Build IPA` → `Run workflow` → download from `Artifacts` after ~8 minutes
 
 > [!WARNING]
-> Apps signed with a free Apple ID **expire after 7 days** (an Apple limitation, not a bug). To renew: just sideload again with Sideloadly — your data is preserved. If iOS says "Untrusted Developer": `Settings → General → VPN & Device Management → Trust`.
+> Apps installed via self-signing with a free Apple ID **expire after 7 days** (an Apple limitation, not a bug). To renew: just self-sign and install again — your data is preserved. If iOS says "Untrusted Developer": `Settings → General → VPN & Device Management → Trust`.
 
 ---
 
@@ -151,7 +150,7 @@ MIT licensed — fork away. **No Mac required**: iOS apps must be built on macOS
 1. **Fork this repo** to your GitHub account
 2. Open the `Actions` tab, select `Build IPA` on the left, click `Run workflow`
 3. Wait ~8 minutes; once green, open the run and download `PhotoSwipe-IPA` from `Artifacts`
-4. Unzip to get `PhotoSwipe.ipa`, load it in [Sideloadly](https://sideloadly.io), enter your Apple ID, click `Start`
+4. Unzip to get `PhotoSwipe.ipa` (or use the pre-built `PhotoSwipe.ipa` at the repository root), then self-sign and install it on your iPhone
 
 ### If You're Unsure
 
@@ -161,13 +160,13 @@ Send this to any AI assistant:
 I have an iOS project on GitHub (Swift + SwiftUI, project managed by XcodeGen,
 with .github/workflows/build.yml in the repo). I don't have a Mac, only a Windows PC.
 Give me detailed steps for: forking the repo, building an unsigned IPA with GitHub
-Actions, downloading the artifact, and installing it on my iPhone with Sideloadly.
+Actions, downloading the artifact, and self-signing to install it on my iPhone.
 Explain what UI I'll see at each step.
 ```
 
 ### Signing Validity
 
-A free Apple ID signature lasts **7 days**, after which tapping the icon crashes. That's Apple's restriction for free accounts, not a bug. Renewing: reconnect to the computer and sideload again — local data is preserved.
+A free Apple ID self-signature lasts **7 days**, after which tapping the icon crashes. That's Apple's restriction for free accounts, not a bug. Renewing: self-sign and install again — local data is preserved.
 
 ---
 
